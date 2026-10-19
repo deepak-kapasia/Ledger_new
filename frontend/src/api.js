@@ -1,5 +1,6 @@
 // Local development uses Vite's /api proxy. Production supplies the backend origin.
-const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
+const configuredApiOrigin = import.meta.env.VITE_API_URL?.replace(/\/$/, '');
+const API_BASE = configuredApiOrigin ? `${configuredApiOrigin}/api` : '/api';
 
 async function request(method, path, body) {
   const opts = {
