@@ -1,4 +1,4 @@
-# Backend Ledger
+# Ledger
 
 A ledger application with a Node.js/Express API and a React/Vite frontend. The backend uses MongoDB for persistence and JWT-based authentication with HTTP-only cookies.
 
