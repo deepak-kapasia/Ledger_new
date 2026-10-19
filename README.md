@@ -25,7 +25,7 @@ A ledger application with a Node.js/Express API and a React/Vite frontend. The b
 
 2. Fill in the values in `backend/.env`. Never commit `.env`; only `.env.example` belongs in Git.
 
-   For Gmail delivery, use the sender account in `EMAIL_USER` and a Gmail App Password in `EMAIL_PASSWORD`. Google requires 2-Step Verification before an App Password can be created. If `EMAIL_PASSWORD` is set, the app uses it and does not use the OAuth2 variables. Keep the OAuth2 variables only if you intentionally choose the OAuth2 setup.
+   For Render Free, configure Gmail OAuth2 with `EMAIL_USER`, `CLIENT_ID`, `CLIENT_SECRET`, and `REFRESH_TOKEN`. The app sends through Gmail's HTTPS API, so it does not require SMTP ports. `EMAIL_PASSWORD` is only an optional local/paid-Render SMTP fallback because Render Free blocks SMTP ports 25, 465, and 587.
 
 3. Install frontend dependencies:
 

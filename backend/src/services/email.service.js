@@ -1,60 +1,135 @@
 const nodemailer = require('nodemailer');
 
-// Gmail App Password authentication is the simplest option for a single
-// sender account and avoids refresh-token expiry/mismatch problems. OAuth2
-// remains supported when EMAIL_PASSWORD is not configured.
+const oauthConfig = [
+    'EMAIL_USER',
+    'CLIENT_ID',
+    'CLIENT_SECRET',
+    'REFRESH_TOKEN',
+].every((key) => Boolean(process.env[key]));
+
 const emailPassword = process.env.EMAIL_PASSWORD?.replace(/\s+/g, '');
-const emailAuth = emailPassword
-    ? {
-        user: process.env.EMAIL_USER,
-        pass: emailPassword,
+
+// Render Free blocks outbound SMTP ports. When OAuth2 values are present,
+// use Gmail's HTTPS API instead of SMTP so delivery works over port 443.
+const smtpTransporter = emailPassword
+    ? nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+            user: process.env.EMAIL_USER,
+            pass: emailPassword,
+        },
+    })
+    : null;
+
+async function getGmailAccessToken() {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+            client_id: process.env.CLIENT_ID,
+            client_secret: process.env.CLIENT_SECRET,
+            refresh_token: process.env.REFRESH_TOKEN,
+            grant_type: 'refresh_token',
+        }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload.access_token) {
+        const reason = payload.error_description || payload.error || `HTTP ${response.status}`;
+        throw new Error(`Gmail OAuth token request failed: ${reason}`);
     }
-    : {
-        type: 'OAuth2',
-        user: process.env.EMAIL_USER,
-        clientId: process.env.CLIENT_ID,
-        clientSecret: process.env.CLIENT_SECRET,
-        refreshToken: process.env.REFRESH_TOKEN,
-    };
 
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: emailAuth,
-});
+    return payload.access_token;
+}
 
-// Verify the connection configuration
-transporter.verify((error, success) => {
-    if (error) {
-        console.error('Error connecting to email server:', error);
-    } else {
-        console.log(`Email server is ready to send messages using Gmail ${emailPassword ? 'App Password' : 'OAuth2'}`);
+async function sendWithGmailApi(to, subject, text, html) {
+    const accessToken = await getGmailAccessToken();
+    const rawMessage = [
+        `From: "Backend Ledger" <${process.env.EMAIL_USER}>`,
+        `To: ${to}`,
+        `Subject: ${subject}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/html; charset=UTF-8',
+        'Content-Transfer-Encoding: 8bit',
+        '',
+        html || text,
+    ].join('\r\n');
+
+    const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            raw: Buffer.from(rawMessage, 'utf8').toString('base64url'),
+        }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload.id) {
+        const reason = payload.error?.message || `HTTP ${response.status}`;
+        throw new Error(`Gmail API send failed: ${reason}`);
     }
-});
 
+    console.log('Message sent via Gmail API: %s', payload.id);
+}
 
-// Function to send email
+async function verifyEmailService() {
+    if (oauthConfig) {
+        try {
+            await getGmailAccessToken();
+            console.log('Email server is ready to send messages using Gmail HTTPS API');
+        } catch (error) {
+            console.error('Error connecting to Gmail HTTPS API:', error.message);
+        }
+        return;
+    }
+
+    if (smtpTransporter) {
+        smtpTransporter.verify((error) => {
+            if (error) {
+                console.error('Error connecting to email server:', error);
+            } else {
+                console.log('Email server is ready to send messages using Gmail SMTP');
+            }
+        });
+        return;
+    }
+
+    console.error('Email service is not configured: add Gmail OAuth2 variables');
+}
+
+void verifyEmailService();
+
 const sendEmail = async (to, subject, text, html) => {
     try {
-        const info = await transporter.sendMail({
-            from: `"Backend Ledger" <${process.env.EMAIL_USER}>`, // sender address
-            to, // list of receivers
-            subject, // Subject line
-            text, // plain text body
-            html, // html body
+        if (oauthConfig) {
+            await sendWithGmailApi(to, subject, text, html);
+            return;
+        }
+
+        if (!smtpTransporter) {
+            throw new Error('Email service is not configured');
+        }
+
+        const info = await smtpTransporter.sendMail({
+            from: `"Backend Ledger" <${process.env.EMAIL_USER}>`,
+            to,
+            subject,
+            text,
+            html,
         });
 
-        console.log('Message sent: %s', info.messageId);
-        console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
+        console.log('Message sent via Gmail SMTP: %s', info.messageId);
     } catch (error) {
-        console.error('Error sending email:', error);
-        console.error('Email provider details:', {
-            code: error.code,
-            command: error.command,
-            response: error.response,
-        });
+        console.error('Error sending email:', error.message);
     }
 };
-
 
 async function sendRegistrationEmail(userEmail, name) {
     const subject = 'Welcome to Backend Ledger!';
@@ -83,5 +158,5 @@ async function sendTransactionFailureEmail(userEmail, name, amount, toAccount) {
 module.exports = {
     sendRegistrationEmail,
     sendTransactionEmail,
-    sendTransactionFailureEmail
+    sendTransactionFailureEmail,
 };
