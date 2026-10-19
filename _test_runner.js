@@ -3,6 +3,10 @@
 "use strict";
 
 const BASE = "http://localhost:3000";
+const PROJECT_ROOT = __dirname;
+const RUN_ID = `${Date.now()}-${process.pid}`;
+const ALICE_EMAIL = `alice-${RUN_ID}@test.com`;
+const BOB_EMAIL = `bob-${RUN_ID}@test.com`;
 let PASS = 0, FAIL = 0;
 const results = [];
 
@@ -42,7 +46,8 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 const { execSync } = require("child_process");
 const fs = require("fs");
-const mongoose = require("./backend/node_modules/mongoose");
+const mongoose = require(require("path").join(PROJECT_ROOT, "backend/node_modules/mongoose"));
+const TEST_MONGO_URI = process.env.TEST_MONGO_URI || "mongodb://localhost:27017/ledger";
 
 (async () => {
 
@@ -65,7 +70,7 @@ const mongoose = require("./backend/node_modules/mongoose");
       goodOrigin.headers.get("access-control-allow-origin") === "http://localhost:5173");
     const badOrigin = await fetch(`${BASE}/`, { headers: { Origin: "http://evil.com" } });
     check("Blocks evil.com origin",
-      goodOrigin.headers.get("access-control-allow-origin") !== "http://evil.com");
+      badOrigin.headers.get("access-control-allow-origin") !== "http://evil.com");
   }
 
   // ─── 3. REGISTER (before rate limit) ─────────────
@@ -73,7 +78,7 @@ const mongoose = require("./backend/node_modules/mongoose");
   let TOKEN_A, TOKEN_B;
   {
     const r = await api("POST", "/api/auth/register",
-      { name: "Alice", email: "alice@test.com", password: "alice123" });
+      { name: "Alice", email: ALICE_EMAIL, password: "alice123" });
     check("Register Alice → 201", r.status === 201, r.status, 201);
     check("Returns user object with name", r.data.user?.name === "Alice");
     check("Returns JWT token", typeof r.data.token === "string" && r.data.token.length > 10);
@@ -81,12 +86,12 @@ const mongoose = require("./backend/node_modules/mongoose");
     TOKEN_A = r.data.token;
 
     const r2 = await api("POST", "/api/auth/register",
-      { name: "Bob", email: "bob@test.com", password: "bob123" });
+      { name: "Bob", email: BOB_EMAIL, password: "bob123" });
     check("Register Bob → 201", r2.status === 201, r2.status, 201);
     TOKEN_B = r2.data.token;
 
     const dup = await api("POST", "/api/auth/register",
-      { name: "Alice2", email: "alice@test.com", password: "x" });
+      { name: "Alice2", email: ALICE_EMAIL, password: "x" });
     check("Duplicate email → 422", dup.status === 422, dup.status, 422);
     check("Duplicate email returns status:failed", dup.data.status === "failed");
   }
@@ -97,7 +102,7 @@ const mongoose = require("./backend/node_modules/mongoose");
     const r = await fetch(`${BASE}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "alice@test.com", password: "alice123" })
+      body: JSON.stringify({ email: ALICE_EMAIL, password: "alice123" })
     });
     const cookie = r.headers.get("set-cookie") || "";
     TOKEN_A = (await r.json()).token || TOKEN_A;
@@ -109,7 +114,7 @@ const mongoose = require("./backend/node_modules/mongoose");
     const r2 = await fetch(`${BASE}/api/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: "bob@test.com", password: "bob123" })
+      body: JSON.stringify({ email: BOB_EMAIL, password: "bob123" })
     });
     TOKEN_B = (await r2.json()).token || TOKEN_B;
   }
@@ -118,7 +123,7 @@ const mongoose = require("./backend/node_modules/mongoose");
   section("5. AUTH — LOGIN");
   {
     const bad = await api("POST", "/api/auth/login",
-      { email: "alice@test.com", password: "WRONG" });
+      { email: ALICE_EMAIL, password: "WRONG" });
     check("Wrong password → 401", bad.status === 401, bad.status, 401);
     check("Wrong password says INVALID", bad.data.message?.includes("INVALID"));
 
@@ -183,7 +188,7 @@ const mongoose = require("./backend/node_modules/mongoose");
       missing.data.message?.toLowerCase().includes("required"), missing.data.message);
 
     const insuf = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 500, idempotencyKey: "insuf-1" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 500, idempotencyKey: `insuf-${RUN_ID}` },
       TOKEN_A);
     check("Insufficient balance → 400", insuf.status === 400, insuf.status, 400);
     check("Insufficient balance message correct",
@@ -191,7 +196,7 @@ const mongoose = require("./backend/node_modules/mongoose");
 
     const badAcct = await api("POST", "/api/transactions/",
       { fromAccount: "000000000000000000000000", toAccount: "000000000000000000000001",
-        amount: 10, idempotencyKey: "bad-acct-1" }, TOKEN_A);
+        amount: 10, idempotencyKey: `bad-acct-${RUN_ID}` }, TOKEN_A);
     check("Invalid account IDs → 400", badAcct.status === 400, badAcct.status, 400);
     check("Invalid accounts message correct",
       badAcct.data.message?.includes("Invalid"), badAcct.data.message);
@@ -201,7 +206,7 @@ const mongoose = require("./backend/node_modules/mongoose");
   section("10. ACCOUNT OWNERSHIP — Bug #3 Fix");
   {
     const steal = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_B1, amount: 10, idempotencyKey: "steal-1" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_B1, amount: 10, idempotencyKey: `steal-${RUN_ID}` },
       TOKEN_B);
     check("Bob cannot use Alice's account as source → 400",
       steal.status === 400, steal.status, 400);
@@ -219,7 +224,7 @@ const mongoose = require("./backend/node_modules/mongoose");
         const t = db.transactions.insertOne({
           fromAccount: ObjectId('000000000000000000000000'),
           toAccount: aid, amount: 10000,
-          idempotencyKey: 'seed-final-001',
+          idempotencyKey: 'seed-final-${RUN_ID}',
           status: 'COMPLETED', createdAt: new Date(), updatedAt: new Date()
         });
         db.ledgers.insertOne({ account: aid, amount: 10000, transaction: t.insertedId, type: 'CREDIT' });
@@ -232,7 +237,7 @@ const mongoose = require("./backend/node_modules/mongoose");
 
     // Transfer 1
     const txn1 = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 3000, idempotencyKey: "txn-001" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 3000, idempotencyKey: `txn-001-${RUN_ID}` },
       TOKEN_A);
     check("Transfer 3000 A1→A2 → 201", txn1.status === 201, txn1.status, 201);
     check("Transfer response message correct",
@@ -240,7 +245,7 @@ const mongoose = require("./backend/node_modules/mongoose");
 
     // Transfer 2
     const txn2 = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 1000, idempotencyKey: "txn-002" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 1000, idempotencyKey: `txn-002-${RUN_ID}` },
       TOKEN_A);
     check("Transfer 1000 A1→A2 → 201", txn2.status === 201, txn2.status, 201);
 
@@ -255,7 +260,7 @@ const mongoose = require("./backend/node_modules/mongoose");
 
     // Idempotency
     const idem = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 3000, idempotencyKey: "txn-001" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 3000, idempotencyKey: `txn-001-${RUN_ID}` },
       TOKEN_A);
     check("Duplicate idempotency key → 200 (not 201 or 500)",
       idem.status === 200, idem.status, 200);
@@ -264,7 +269,7 @@ const mongoose = require("./backend/node_modules/mongoose");
 
     // Overdraft
     const over = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 99999, idempotencyKey: "over-1" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 99999, idempotencyKey: `over-${RUN_ID}` },
       TOKEN_A);
     check("Overdraft rejected → 400", over.status === 400, over.status, 400);
     check("Overdraft message correct",
@@ -277,13 +282,13 @@ const mongoose = require("./backend/node_modules/mongoose");
     // Already tested COMPLETED→200 above. Now make a PENDING-like test via
     // checking the code check of re-using a completed key
     const r = await api("POST", "/api/transactions/",
-      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 3000, idempotencyKey: "txn-001" },
+      { fromAccount: ACCOUNT_A1, toAccount: ACCOUNT_A2, amount: 3000, idempotencyKey: `txn-001-${RUN_ID}` },
       TOKEN_A);
     check("Re-used completed key → 200 not 500", r.status === 200 && r.status !== 500,
       r.status, 200);
     check_code_not_500: {
       // Verify transaction controller code uses 400 not 500 for FAILED/REVERSED
-      const src = fs.readFileSync("./backend/src/controllers/transaction.controller.js", "utf8");
+      const src = fs.readFileSync(require("path").join(PROJECT_ROOT, "backend/src/controllers/transaction.controller.js"), "utf8");
       const hasCorrectStatus = src.includes('res.status(400)') &&
         src.includes('"FAILED"') && src.includes('"REVERSED"');
       check("Source code uses 400 (not 500) for FAILED/REVERSED idempotency", hasCorrectStatus);
@@ -293,8 +298,8 @@ const mongoose = require("./backend/node_modules/mongoose");
   // ─── 13. LEDGER IMMUTABILITY ──────────────────────
   section("13. LEDGER IMMUTABILITY (Mongoose hook layer)");
   {
-    await mongoose.connect("mongodb://localhost:27017/ledger");
-    const LedgerModel = require("./backend/src/models/ledger.model");
+    await mongoose.connect(TEST_MONGO_URI);
+    const LedgerModel = require(require("path").join(PROJECT_ROOT, "backend/src/models/ledger.model"));
 
     let updateBlocked = false;
     try { await LedgerModel.updateOne({}, { $set: { amount: 99999 } }); }
@@ -349,11 +354,11 @@ const mongoose = require("./backend/node_modules/mongoose");
   // ─── 16. SOURCE CODE VERIFICATION ────────────────
   section("16. SOURCE CODE — All Fixes Verified");
   {
-    const appJs   = fs.readFileSync("./backend/src/app.js", "utf8");
-    const authCtl = fs.readFileSync("./backend/src/controllers/auth.controller.js", "utf8");
-    const txnCtl  = fs.readFileSync("./backend/src/controllers/transaction.controller.js", "utf8");
-    const viteCfg = fs.readFileSync("./frontend/vite.config.js", "utf8");
-    const authCtx = fs.readFileSync("./frontend/src/context/AuthContext.jsx", "utf8");
+    const appJs   = fs.readFileSync(require("path").join(PROJECT_ROOT, "backend/src/app.js"), "utf8");
+    const authCtl = fs.readFileSync(require("path").join(PROJECT_ROOT, "backend/src/controllers/auth.controller.js"), "utf8");
+    const txnCtl  = fs.readFileSync(require("path").join(PROJECT_ROOT, "backend/src/controllers/transaction.controller.js"), "utf8");
+    const viteCfg = fs.readFileSync(require("path").join(PROJECT_ROOT, "frontend/vite.config.js"), "utf8");
+    const authCtx = fs.readFileSync(require("path").join(PROJECT_ROOT, "frontend/src/context/AuthContext.jsx"), "utf8");
 
     check("app.js: cors() middleware present", appJs.includes("cors("));
     check("app.js: rate limiter present", appJs.includes("rateLimit"));
@@ -398,7 +403,7 @@ const mongoose = require("./backend/node_modules/mongoose");
   {
     try {
       const out = execSync("npm run build", {
-        cwd: "./frontend", stdio: "pipe"
+        cwd: require("path").join(PROJECT_ROOT, "frontend"), stdio: "pipe"
       }).toString();
       check("Vite build completes successfully", out.includes("built in") || out.includes("kB"));
     } catch (e) {

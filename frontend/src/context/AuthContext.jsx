@@ -23,6 +23,13 @@ export function AuthProvider({ children }) {
     }
   }, [user]);
 
+  // Clear stale browser sessions when the backend rejects the current token.
+  useEffect(() => {
+    const handleAuthExpired = () => setUser(null);
+    window.addEventListener('ledger:auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('ledger:auth-expired', handleAuthExpired);
+  }, []);
+
   const login = async (email, password) => {
     const data = await auth.login(email, password);
     setUser(data.user);
@@ -36,8 +43,11 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    await auth.logout();
-    setUser(null);
+    try {
+      await auth.logout();
+    } finally {
+      setUser(null);
+    }
   };
 
   return (

@@ -10,8 +10,22 @@ async function request(method, path, body) {
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${API_BASE}${path}`, opts);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.message || 'Request failed');
+  const responseText = await res.text();
+  let data = {};
+
+  try {
+    data = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    data = { message: responseText || `Request failed (${res.status})` };
+  }
+
+  if (!res.ok) {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('ledger:auth-expired'));
+    }
+    throw new Error(data.message || 'Request failed');
+  }
+
   return data;
 }
 

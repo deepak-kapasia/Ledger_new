@@ -106,11 +106,21 @@ async function userLogoutController(req, res) {
 
 
 
-    await tokenBlackListModel.create({
-        token: token
-    })
+    try {
+        await tokenBlackListModel.create({
+            token: token
+        })
+    } catch (err) {
+        // Logout is intentionally idempotent: an already-blacklisted token
+        // should still clear the browser cookie and return success.
+        if (err.code !== 11000) throw err
+    }
 
-    res.clearCookie("token")
+    res.clearCookie("token", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "strict"
+    })
 
     res.status(200).json({
         message: "User logged out successfully"
