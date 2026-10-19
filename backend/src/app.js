@@ -5,6 +5,10 @@ const rateLimit = require("express-rate-limit")
 
 const app = express()
 
+// Render runs the app behind a reverse proxy; trust one proxy hop so
+// express-rate-limit can safely use the forwarded client IP.
+app.set("trust proxy", 1)
+
 // FIX (Sec 3): CORS — only allow requests from the frontend origin
 app.use(cors({
     origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
