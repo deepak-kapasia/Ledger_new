@@ -25,6 +25,8 @@ A ledger application with a Node.js/Express API and a React/Vite frontend. The b
 
 2. Fill in the values in `backend/.env`. Never commit `.env`; only `.env.example` belongs in Git.
 
+   For Gmail delivery, use the sender account in `EMAIL_USER` and a Gmail App Password in `EMAIL_PASSWORD`. Google requires 2-Step Verification before an App Password can be created. If `EMAIL_PASSWORD` is set, the app uses it and does not use the OAuth2 variables. Keep the OAuth2 variables only if you intentionally choose the OAuth2 setup.
+
 3. Install frontend dependencies:
 
    ```bash

@@ -1,14 +1,25 @@
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
+// Gmail App Password authentication is the simplest option for a single
+// sender account and avoids refresh-token expiry/mismatch problems. OAuth2
+// remains supported when EMAIL_PASSWORD is not configured.
+const emailPassword = process.env.EMAIL_PASSWORD?.replace(/\s+/g, '');
+const emailAuth = emailPassword
+    ? {
+        user: process.env.EMAIL_USER,
+        pass: emailPassword,
+    }
+    : {
         type: 'OAuth2',
         user: process.env.EMAIL_USER,
         clientId: process.env.CLIENT_ID,
         clientSecret: process.env.CLIENT_SECRET,
         refreshToken: process.env.REFRESH_TOKEN,
-    },
+    };
+
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: emailAuth,
 });
 
 // Verify the connection configuration
@@ -16,7 +27,7 @@ transporter.verify((error, success) => {
     if (error) {
         console.error('Error connecting to email server:', error);
     } else {
-        console.log('Email server is ready to send messages');
+        console.log(`Email server is ready to send messages using Gmail ${emailPassword ? 'App Password' : 'OAuth2'}`);
     }
 });
 
@@ -36,6 +47,11 @@ const sendEmail = async (to, subject, text, html) => {
         console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
     } catch (error) {
         console.error('Error sending email:', error);
+        console.error('Email provider details:', {
+            code: error.code,
+            command: error.command,
+            response: error.response,
+        });
     }
 };
 
