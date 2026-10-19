@@ -56,6 +56,10 @@ cd backend && npm start
 
 # Frontend production build
 cd frontend && npm run build
+
+# Backend integration test suite
+# Start MongoDB and the backend first, then run this from backend/.
+cd backend && npm test
 ```
 
 ## Security note

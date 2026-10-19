@@ -54,7 +54,11 @@ app.use("/api/transactions", transactionRoutes)
 // route handlers or middleware and returns a clean JSON error response
 app.use((err, req, res, next) => {
     console.error("Unhandled error:", err)
-    res.status(err.status || 500).json({
+    const status = err.name === "ValidationError"
+        ? 400
+        : err.status || err.statusCode || 500
+
+    res.status(status).json({
         message: err.message || "An unexpected error occurred"
     })
 })
